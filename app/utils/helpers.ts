@@ -39,7 +39,7 @@ export function debugLog(message: string, ...args: any[]): void {
 }
 
 /**
- * 生成API请求所需的签名头部 (基于真实Z.AI请求格式)
+ * 生成API请求所需的签名头部
  */
 export async function generateSignatureHeaders(
   token: string, 
@@ -49,7 +49,7 @@ export async function generateSignatureHeaders(
   // 生成时间戳（毫秒）
   const timestamp = Date.now();
   
-  // 生成签名字符串: 根据真实Z.AI格式调整
+  // 生成签名字符串
   const signString = `${method}\n${timestamp}\n${body}`;
   
   // 使用HMAC-SHA256生成签名
@@ -81,7 +81,7 @@ export async function generateSignatureHeaders(
 }
 
 /**
- * 生成API请求的URL查询参数 (基于真实Z.AI请求)
+ * 生成API请求的URL查询参数
  */
 export function generateApiQueryParams(token: string, chatId: string): URLSearchParams {
   const timestamp = Date.now();
