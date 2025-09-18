@@ -39,8 +39,7 @@ export function debugLog(message: string, ...args: any[]): void {
 }
 
 /**
- * 生成API请求所需的签名头部
- * 签名参数逻辑实现
+ * 生成API请求所需的签名头部 (基于真实Z.AI请求格式)
  */
 export async function generateSignatureHeaders(
   token: string, 
@@ -48,15 +47,10 @@ export async function generateSignatureHeaders(
   method: string = "POST"
 ): Promise<Record<string, string>> {
   // 生成时间戳（毫秒）
-  const timestamp = Date.now().toString();
+  const timestamp = Date.now();
   
-  // 生成16位随机nonce
-  const randomBytes = new Uint8Array(8);
-  crypto.getRandomValues(randomBytes);
-  const nonce = Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 16);
-  
-  // 生成签名字符串: method + "\n" + timestamp + "\n" + nonce + "\n" + body
-  const signString = `${method}\n${timestamp}\n${nonce}\n${body}`;
+  // 生成签名字符串: 根据真实Z.AI格式调整
+  const signString = `${method}\n${timestamp}\n${body}`;
   
   // 使用HMAC-SHA256生成签名
   const encoder = new TextEncoder();
@@ -79,13 +73,74 @@ export async function generateSignatureHeaders(
     .map(b => b.toString(16).padStart(2, '0'))
     .join('');
   
-  debugLog(`🔐 生成签名头部: timestamp=${timestamp}, nonce=${nonce.substring(0, 8)}..., signature=${signatureHex.substring(0, 16)}...`);
+  debugLog(`🔐 生成签名: timestamp=${timestamp}, signature=${signatureHex.substring(0, 16)}...`);
   
   return {
-    "X-Timestamp": timestamp,
-    "X-Nonce": nonce,
     "X-Signature": signatureHex
   };
+}
+
+/**
+ * 生成API请求的URL查询参数 (基于真实Z.AI请求)
+ */
+export function generateApiQueryParams(token: string, chatId: string): URLSearchParams {
+  const timestamp = Date.now();
+  const requestId = crypto.randomUUID();
+  
+  // 提取user_id (从token的payload中，如果是JWT格式)
+  let userId = "";
+  try {
+    const tokenParts = token.split('.');
+    if (tokenParts.length === 3) {
+      const payload = JSON.parse(atob(tokenParts[1]));
+      userId = payload.id || "";
+    }
+  } catch (e) {
+    // 如果解析失败，生成一个随机ID
+    userId = crypto.randomUUID();
+  }
+  
+  const params = new URLSearchParams({
+    timestamp: timestamp.toString(),
+    requestId: requestId,
+    user_id: userId,
+    version: "0.0.1",
+    platform: "web",
+    token: token,
+    user_agent: encodeURIComponent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0"),
+    language: "zh-CN",
+    languages: "zh-CN,en,en-GB,en-US",
+    timezone: "Asia/Shanghai",
+    cookie_enabled: "true",
+    screen_width: "1920",
+    screen_height: "1080", 
+    screen_resolution: "1920x1080",
+    viewport_height: "900",
+    viewport_width: "1200",
+    viewport_size: "1200x900",
+    color_depth: "24",
+    pixel_ratio: "1.0",
+    current_url: encodeURIComponent(`https://chat.z.ai/c/${chatId}`),
+    pathname: encodeURIComponent(`/c/${chatId}`),
+    search: "",
+    hash: "",
+    host: "chat.z.ai",
+    hostname: "chat.z.ai",
+    protocol: "https:",
+    referrer: "",
+    title: encodeURIComponent("Chat with Z.ai - Free AI Chatbot powered by GLM-4.5"),
+    timezone_offset: "-480",
+    local_time: new Date().toISOString(),
+    utc_time: new Date().toUTCString(),
+    is_mobile: "false",
+    is_touch: "false",
+    max_touch_points: "10",
+    browser_name: "Chrome",
+    os_name: "Windows",
+    signature_timestamp: timestamp.toString()
+  });
+  
+  return params;
 }
 
 export function generateRequestIds(): [string, string] {
@@ -159,21 +214,22 @@ export async function getBrowserHeaders(refererChatId: string = ""): Promise<Rec
     secChUa = `"Not_A Brand";v="8", "Chromium";v="${chromeVersion}", "Google Chrome";v="${chromeVersion}"`;
   }
   
-  // 构建动态 Headers
+  // 构建动态 Headers 
   const headers: Record<string, string> = {
+    "Accept": "*/*",
+    "Accept-Encoding": "gzip, deflate, br, zstd",
+    "Accept-Language": "zh-CN",
+    "Connection": "keep-alive",
     "Content-Type": "application/json",
-    "Accept": "application/json, text/event-stream",
+    "Host": "chat.z.ai",
+    "Origin": "https://chat.z.ai",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
     "User-Agent": userAgent,
-    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-US;q=0.7",
+    "X-FE-Version": "prod-fe-1.0.84",
     "sec-ch-ua-mobile": "?0",
     "sec-ch-ua-platform": '"Windows"',
-    "sec-fetch-dest": "empty",
-    "sec-fetch-mode": "cors",
-    "sec-fetch-site": "same-origin",
-    "X-FE-Version": "prod-fe-1.0.79",
-    "Origin": config.CLIENT_HEADERS["Origin"],
-    "Cache-Control": "no-cache",
-    "Pragma": "no-cache",
   };
   
   // 只有基于 Chromium 的浏览器才添加 sec-ch-ua
@@ -197,14 +253,7 @@ export async function getBrowserHeaders(refererChatId: string = ""): Promise<Rec
 export async function getAnonymousToken(): Promise<string> {
   /**Get anonymous token for authentication*/
   const headers = await getBrowserHeaders();
-  headers["Accept"] = "*/*";
-  headers["Accept-Language"] = "zh-CN,zh;q=0.9";
   headers["Referer"] = `${config.CLIENT_HEADERS['Origin']}/`;
-  
-  // 为获取token添加签名头部（使用临时token）
-  const tempToken = "anonymous";
-  const signatureHeaders = await generateSignatureHeaders(tempToken, "", "GET");
-  Object.assign(headers, signatureHeaders);
   
   try {
     const response = await fetch(
@@ -276,21 +325,27 @@ export async function callUpstreamApi(
   chatId: string,
   authToken: string
 ): Promise<Response> {
-  /**Call upstream API with proper headers*/
+  /**Call upstream API with proper headers and URL params (based on real Z.AI format)*/
   const headers = await getBrowserHeaders(chatId);
   headers["Authorization"] = `Bearer ${authToken}`;
+  headers["Referer"] = `https://chat.z.ai/c/${chatId}`;
   
-  // 生成请求体JSON字符串用于签名
+  // 生成请求体JSON字符串
   const bodyJson = JSON.stringify(upstreamReq);
+  headers["Content-Length"] = bodyJson.length.toString();
+  
+  // 生成URL查询参数
+  const queryParams = generateApiQueryParams(authToken, chatId);
+  const fullUrl = `${config.API_ENDPOINT}?${queryParams.toString()}`;
   
   // 生成签名头部
   const signatureHeaders = await generateSignatureHeaders(authToken, bodyJson, "POST");
   Object.assign(headers, signatureHeaders);
   
-  debugLog(`调用上游API: ${config.API_ENDPOINT}`);
-  debugLog(`上游请求体: ${bodyJson}`);
+  debugLog(`调用上游API: ${fullUrl}`);
+  debugLog(`上游请求体长度: ${bodyJson.length}`);
   
-  const response = await fetch(config.API_ENDPOINT, {
+  const response = await fetch(fullUrl, {
     method: "POST",
     headers,
     body: bodyJson,
