@@ -172,36 +172,63 @@ openaiRouter.post("/chat/completions", async (ctx) => {
       ctx.response.headers.set("Content-Type", "text/event-stream");
       ctx.response.headers.set("Cache-Control", "no-cache");
       ctx.response.headers.set("Connection", "keep-alive");
+      ctx.response.headers.set("Access-Control-Allow-Origin", "*");
       
-      // Create a readable stream
+      // Create a readable stream with better error handling
       const stream = new ReadableStream({
         async start(controller) {
           try {
+            let hasStarted = false;
             for await (const chunk of handler.handle()) {
+              hasStarted = true;
               controller.enqueue(new TextEncoder().encode(chunk));
             }
             controller.close();
           } catch (error) {
-            controller.error(error);
+            debugLog(`流式响应处理错误: ${error}`);
+            // 发送错误信息到客户端
+            try {
+              const errorChunk = `data: {"error": {"message": "Stream processing error", "type": "internal_error"}}\n\n`;
+              controller.enqueue(new TextEncoder().encode(errorChunk));
+              controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
+            } catch (controllerError) {
+              debugLog(`控制器错误: ${controllerError}`);
+            }
+            controller.close();
           }
+        },
+        cancel() {
+          debugLog("客户端取消了流式响应");
         }
       });
       
       ctx.response.body = stream;
     } else {
-      const handler = new NonStreamResponseHandler(upstreamReq, chatId, authToken, hasTools);
-      const response = await handler.handle();
-      
-      // Copy response properties
-      ctx.response.status = response.status;
-      ctx.response.headers = response.headers;
-      ctx.response.body = await response.text();
+      try {
+        const handler = new NonStreamResponseHandler(upstreamReq, chatId, authToken, hasTools);
+        const response = await handler.handle();
+        
+        // Copy response properties
+        ctx.response.status = response.status;
+        ctx.response.headers = response.headers;
+        ctx.response.body = await response.text();
+      } catch (nonStreamError) {
+        debugLog(`非流式响应处理错误: ${nonStreamError}`);
+        ctx.response.status = 500;
+        ctx.response.body = { error: `Non-stream processing error: ${nonStreamError}` };
+      }
     }
         
   } catch (error) {
-    debugLog(`处理请求时发生错误: ${error}`);
+    debugLog(`外层请求处理错误: ${error}`);
     console.error("Error stack:", error);
-    ctx.response.status = 500;
-    ctx.response.body = { error: `Internal server error: ${error}` };
+    
+    // 只有在响应还没有开始时才设置错误响应
+    if (!ctx.response.body) {
+      ctx.response.status = 500;
+      ctx.response.body = { error: `Internal server error: ${error}` };
+    } else {
+      debugLog("响应已开始，无法设置错误状态");
+    }
   }
 });
