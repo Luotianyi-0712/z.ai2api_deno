@@ -39,7 +39,7 @@ export function debugLog(message: string, ...args: any[]): void {
 }
 
 /**
- * 生成API请求所需的签名头部
+ * 生成API请求所需的签名头部 (基于真实Z.AI请求格式)
  */
 export async function generateSignatureHeaders(
   token: string, 
@@ -49,7 +49,7 @@ export async function generateSignatureHeaders(
   // 生成时间戳（毫秒）
   const timestamp = Date.now();
   
-  // 生成签名字符串
+  // 生成签名字符串: 根据真实Z.AI格式调整
   const signString = `${method}\n${timestamp}\n${body}`;
   
   // 使用HMAC-SHA256生成签名
@@ -81,7 +81,7 @@ export async function generateSignatureHeaders(
 }
 
 /**
- * 生成API请求的URL查询参数
+ * 生成API请求的URL查询参数 (基于真实Z.AI请求)
  */
 export function generateApiQueryParams(token: string, chatId: string): URLSearchParams {
   const timestamp = Date.now();
@@ -214,7 +214,7 @@ export async function getBrowserHeaders(refererChatId: string = ""): Promise<Rec
     secChUa = `"Not_A Brand";v="8", "Chromium";v="${chromeVersion}", "Google Chrome";v="${chromeVersion}"`;
   }
   
-  // 构建动态 Headers 
+  // 构建动态 Headers (基于真实Z.AI请求格式)
   const headers: Record<string, string> = {
     "Accept": "*/*",
     "Accept-Encoding": "gzip, deflate, br, zstd",
@@ -325,33 +325,105 @@ export async function callUpstreamApi(
   chatId: string,
   authToken: string
 ): Promise<Response> {
-  /**Call upstream API with proper headers and URL params (based on real Z.AI format)*/
-  const headers = await getBrowserHeaders(chatId);
-  headers["Authorization"] = `Bearer ${authToken}`;
-  headers["Referer"] = `https://chat.z.ai/c/${chatId}`;
+  /**Call upstream API with proper headers, URL params and robust error handling*/
+  const maxRetries = 2;
+  const baseTimeout = 90000; // 增加到90秒基础超时
   
-  // 生成请求体JSON字符串
-  const bodyJson = JSON.stringify(upstreamReq);
-  headers["Content-Length"] = bodyJson.length.toString();
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const headers = await getBrowserHeaders(chatId);
+      headers["Authorization"] = `Bearer ${authToken}`;
+      headers["Referer"] = `https://chat.z.ai/c/${chatId}`;
+      
+      // 生成请求体JSON字符串
+      const bodyJson = JSON.stringify(upstreamReq);
+      headers["Content-Length"] = bodyJson.length.toString();
+      
+      // 生成URL查询参数
+      const queryParams = generateApiQueryParams(authToken, chatId);
+      const fullUrl = `${config.API_ENDPOINT}?${queryParams.toString()}`;
+      
+      // 生成签名头部
+      const signatureHeaders = await generateSignatureHeaders(authToken, bodyJson, "POST");
+      Object.assign(headers, signatureHeaders);
+      
+      // 动态超时：重试时增加超时时间
+      const timeout = baseTimeout + (attempt * 30000); // 90s, 120s, 150s
+      
+      debugLog(`调用上游API (尝试 ${attempt + 1}/${maxRetries}): ${fullUrl}`);
+      debugLog(`上游请求体长度: ${bodyJson.length}, 超时: ${timeout}ms`);
+      
+      const abortController = new AbortController();
+      const timeoutId = setTimeout(() => {
+        abortController.abort();
+        debugLog(`请求超时 (${timeout}ms)，主动中断请求`);
+      }, timeout);
+      
+      try {
+        const response = await fetch(fullUrl, {
+          method: "POST",
+          headers,
+          body: bodyJson,
+          signal: abortController.signal,
+        });
+        
+        clearTimeout(timeoutId);
+        debugLog(`✅ 上游响应成功: ${response.status} (尝试 ${attempt + 1})`);
+        return response;
+        
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        throw fetchError;
+      }
+      
+    } catch (error) {
+      const isLastAttempt = attempt === maxRetries - 1;
+      
+      // 分析错误类型
+      let errorType = "unknown";
+      let shouldRetry = false;
+      
+      if (error instanceof Error) {
+        if (error.name === "AbortError" || error.message.includes("aborted")) {
+          errorType = "timeout_or_abort";
+          shouldRetry = !isLastAttempt; // 超时可以重试
+        } else if (error.message.includes("network") || error.message.includes("fetch")) {
+          errorType = "network";
+          shouldRetry = !isLastAttempt; // 网络错误可以重试
+        } else if (error.message.includes("Failed to fetch")) {
+          errorType = "connection";
+          shouldRetry = !isLastAttempt; // 连接错误可以重试
+        }
+      }
+      
+      debugLog(`❌ 上游API调用失败 (尝试 ${attempt + 1}): ${error.message} (类型: ${errorType})`);
+      
+      if (isLastAttempt || !shouldRetry) {
+        // 最后一次尝试或不应重试的错误，抛出详细错误
+        let friendlyMessage = "";
+        switch (errorType) {
+          case "timeout_or_abort":
+            friendlyMessage = "请求超时或被中断，可能是网络较慢或服务器负载较高";
+            break;
+          case "network":
+            friendlyMessage = "网络连接错误，请检查网络状态";
+            break;
+          case "connection":
+            friendlyMessage = "无法连接到服务器，服务可能暂时不可用";
+            break;
+          default:
+            friendlyMessage = `请求失败: ${error.message}`;
+        }
+        
+        throw new Error(friendlyMessage);
+      }
+      
+      // 等待后重试
+      const waitTime = (attempt + 1) * 2000; // 2s, 4s
+      debugLog(`⏳ 等待 ${waitTime}ms 后重试...`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
+  }
   
-  // 生成URL查询参数
-  const queryParams = generateApiQueryParams(authToken, chatId);
-  const fullUrl = `${config.API_ENDPOINT}?${queryParams.toString()}`;
-  
-  // 生成签名头部
-  const signatureHeaders = await generateSignatureHeaders(authToken, bodyJson, "POST");
-  Object.assign(headers, signatureHeaders);
-  
-  debugLog(`调用上游API: ${fullUrl}`);
-  debugLog(`上游请求体长度: ${bodyJson.length}`);
-  
-  const response = await fetch(fullUrl, {
-    method: "POST",
-    headers,
-    body: bodyJson,
-    signal: AbortSignal.timeout(60000),
-  });
-  
-  debugLog(`上游响应状态: ${response.status}`);
-  return response;
+  throw new Error("所有重试均失败");
 }
