@@ -57,11 +57,22 @@ export abstract class ResponseHandler {
   }
   
   protected async _callUpstream(): Promise<Response> {
-    /**Call upstream API with error handling*/
+    /**Call upstream API with enhanced error handling*/
     try {
       return await callUpstreamApi(this.upstreamReq, this.chatId, this.authToken);
     } catch (error) {
-      debugLog(`调用上游失败: ${error}`);
+      // 改进错误日志，提供更多上下文
+      if (error instanceof Error) {
+        if (error.name === "AbortError" || error.message.includes("aborted")) {
+          debugLog(`❌ 上游请求被中断: ${error.message} (chat_id=${this.chatId})`);
+        } else if (error.message.includes("timeout")) {
+          debugLog(`⏱️ 上游请求超时: ${error.message} (chat_id=${this.chatId})`);
+        } else {
+          debugLog(`❌ 上游请求失败: ${error.message} (chat_id=${this.chatId})`);
+        }
+      } else {
+        debugLog(`❌ 上游请求发生未知错误: ${error} (chat_id=${this.chatId})`);
+      }
       throw error;
     }
   }
@@ -81,6 +92,7 @@ export class StreamResponseHandler extends ResponseHandler {
   private hasTools: boolean;
   private bufferedContent: string = "";
   private toolCalls: any = null;
+  private streamEnded: boolean = false; // 防止重复结束流
   
   constructor(upstreamReq: UpstreamRequest, chatId: string, authToken: string, hasTools: boolean = false) {
     super(upstreamReq, chatId, authToken);
@@ -94,8 +106,23 @@ export class StreamResponseHandler extends ResponseHandler {
     let response: Response;
     try {
       response = await this._callUpstream();
-    } catch {
-      yield "data: {\"error\": \"Failed to call upstream\"}\n\n";
+    } catch (error) {
+      // 根据错误类型提供不同的错误消息
+      let errorMessage = "Failed to call upstream";
+      if (error instanceof Error) {
+        if (error.name === "AbortError" || error.message.includes("aborted")) {
+          errorMessage = "请求被中断或超时，请稍后重试";
+        } else if (error.message.includes("timeout")) {
+          errorMessage = "请求超时，请检查网络连接后重试";
+        } else if (error.message.includes("network")) {
+          errorMessage = "网络连接错误，请检查网络状态";
+        } else {
+          errorMessage = error.message || "上游服务调用失败";
+        }
+      }
+      
+      yield `data: {"error": {"message": "${errorMessage}", "type": "upstream_error"}}\n\n`;
+      yield "data: [DONE]\n\n";
       return;
     }
     
@@ -127,7 +154,10 @@ export class StreamResponseHandler extends ResponseHandler {
         // Check for errors
         if (this._hasError(upstreamData)) {
           const error = this._getError(upstreamData);
-          yield* handleUpstreamError(error);
+          if (!this.streamEnded) {
+            yield* handleUpstreamError(error);
+            this.streamEnded = true;
+          }
           break;
         }
         
@@ -138,14 +168,38 @@ export class StreamResponseHandler extends ResponseHandler {
         yield* this._processContent(upstreamData, sentInitialAnswer);
         
         // Check if done
-        if (upstreamData.data.done || upstreamData.data.phase === "done") {
+        if ((upstreamData.data.done || upstreamData.data.phase === "done") && !this.streamEnded) {
           debugLog("检测到流结束信号");
           yield* this._sendEndChunk();
+          this.streamEnded = true;
           break;
+        }
+      }
+    } catch (streamError) {
+      debugLog(`流处理异常: ${streamError}`);
+      // 确保在异常情况下也能正确结束流
+      if (!this.streamEnded) {
+        try {
+          const errorChunk = createOpenAIResponseChunk(
+            config.PRIMARY_MODEL,
+            undefined,
+            "stop"
+          );
+          yield `data: ${JSON.stringify(errorChunk)}\n\n`;
+          yield "data: [DONE]\n\n";
+          this.streamEnded = true;
+          debugLog("异常情况下强制结束流");
+        } catch (endError) {
+          debugLog(`结束流时发生错误: ${endError}`);
         }
       }
     } finally {
       await parser[Symbol.asyncDispose]();
+      // 最后的保护：确保无论如何都标记为已结束
+      if (!this.streamEnded) {
+        this.streamEnded = true;
+        debugLog("在finally块中标记流为已结束");
+      }
     }
   }
   
@@ -235,7 +289,12 @@ export class StreamResponseHandler extends ResponseHandler {
   }
   
   private async *_sendEndChunk(): AsyncGenerator<string, void, unknown> {
-    /**Send end chunk and DONE signal*/
+    /**Send end chunk and DONE signal (with duplicate protection)*/
+    if (this.streamEnded) {
+      debugLog("流已结束，跳过重复的结束信号");
+      return;
+    }
+    
     let finishReason = "stop";
     
     if (this.hasTools) {
@@ -282,6 +341,7 @@ export class StreamResponseHandler extends ResponseHandler {
     );
     yield `data: ${JSON.stringify(endChunk)}\n\n`;
     yield "data: [DONE]\n\n";
+    this.streamEnded = true;
     debugLog("流式响应完成");
   }
 }
@@ -302,10 +362,38 @@ export class NonStreamResponseHandler extends ResponseHandler {
     try {
       response = await this._callUpstream();
     } catch (error) {
-      debugLog(`调用上游失败: ${error}`);
+      // 根据错误类型提供不同的错误消息和状态码
+      let errorMessage = "Failed to call upstream";
+      let statusCode = 502;
+      
+      if (error instanceof Error) {
+        if (error.name === "AbortError" || error.message.includes("aborted")) {
+          errorMessage = "请求被中断或超时，请稍后重试";
+          statusCode = 408; // Request Timeout
+        } else if (error.message.includes("timeout")) {
+          errorMessage = "请求超时，请检查网络连接后重试";
+          statusCode = 408;
+        } else if (error.message.includes("network")) {
+          errorMessage = "网络连接错误，请检查网络状态";
+          statusCode = 503; // Service Unavailable
+        } else {
+          errorMessage = error.message || "上游服务调用失败";
+          statusCode = 502; // Bad Gateway
+        }
+      }
+      
       return new Response(
-        JSON.stringify({ error: "Failed to call upstream" }),
-        { status: 502, headers: { "Content-Type": "application/json" } }
+        JSON.stringify({ 
+          error: {
+            message: errorMessage,
+            type: "upstream_error",
+            details: error instanceof Error ? error.name : "unknown"
+          }
+        }),
+        { 
+          status: statusCode, 
+          headers: { "Content-Type": "application/json" } 
+        }
       );
     }
     
