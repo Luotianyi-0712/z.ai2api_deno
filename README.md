@@ -1,6 +1,6 @@
 <div align="center">
   <img width="100" src="https://wsrv.nl/?url=https%3a%2f%2fz-cdn.chatglm.cn%2fz-ai%2fstatic%2flogo.svg&w=300&output=webp" />
-  <h1>Z.AI OpenAI API 代理服务 (Deno版)</h1>
+  <h1>Z.AI OpenAI API 测试版 (快速更新网页接口，但是未经过充分验证)</h1>
   
   ![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
   ![Deno: 1.40+](https://img.shields.io/badge/deno-1.40+-green.svg)
@@ -54,58 +54,6 @@ Deno Deploy是一个全球分布式的边缘计算平台，非常适合部署Den
    - 点击"Deploy"按钮
    - 等待部署完成
 
-### 本地部署
-
-**环境要求**
-- Deno 1.40+
-- 现代浏览器或 Node.js 环境
-
-### 安装运行
-
-```bash
-# 克隆项目
-git clone https://github.com/Luotianyi-0712/z.ai2api_deno.git
-cd z.ai2api_deno
-
-# 使用 Deno 运行
-deno task start
-
-# 或开发模式（自动重载）
-deno task dev
-```
-
-服务启动后访问：http://localhost:8080/v1/models
-
-### 基础使用
-
-#### OpenAI API 客户端
-
-```typescript
-import OpenAI from 'openai';
-
-// 初始化客户端
-const client = new OpenAI({
-  baseURL: "http://localhost:8080/v1",
-  apiKey: "your-auth-token"  // 替换为你的 AUTH_TOKEN
-});
-
-// 普通对话
-const response = await client.chat.completions.create({
-  model: "GLM-4.5",
-  messages: [{ role: "user", content: "你好，介绍一下 TypeScript" }],
-  stream: false
-});
-
-console.log(response.choices[0].message.content);
-```
-
-### Docker 部署
-
-```bash
-cd deploy
-docker-compose up -d
-```
-
 ## 📖 详细指南
 
 ### 支持的模型
@@ -117,56 +65,6 @@ docker-compose up -d
 | `GLM-4.5-Search` | 0727-360B-API | 搜索模型 | 实时网络搜索，信息更新 |
 | `GLM-4.5-Air` | 0727-106B-API | 轻量模型 | 快速响应，高效推理 |
 | `GLM-4.5V` | glm-4.5v | ❌ 暂不支持 |   |
-
-### Function Call 功能
-
-```typescript
-// 定义工具
-const tools = [{
-  type: "function",
-  function: {
-    name: "get_weather",
-    description: "获取天气信息",
-    parameters: {
-      type: "object",
-      properties: {
-        city: { type: "string", description: "城市名称" }
-      },
-      required: ["city"]
-    }
-  }
-}];
-
-// 使用工具
-const response = await client.chat.completions.create({
-  model: "GLM-4.5",
-  messages: [{ role: "user", content: "北京天气怎么样？" }],
-  tools: tools,
-  tool_choice: "auto"
-});
-```
-
-### 流式响应
-
-```typescript
-const response = await client.chat.completions.create({
-  model: "GLM-4.5-Thinking",
-  messages: [{ role: "user", content: "解释量子计算" }],
-  stream: true
-});
-
-for await (const chunk of response) {
-  const content = chunk.choices[0].delta.content;
-  const reasoning = chunk.choices[0].delta.reasoning_content;
-  
-  if (content) {
-    process.stdout.write(content);
-  }
-  if (reasoning) {
-    console.log(`\n🤔 思考: ${reasoning}\n`);
-  }
-}
-```
 
 ## ⚙️ 配置说明
 
@@ -195,64 +93,7 @@ for await (const chunk of response) {
 - `strip` - 移除思考内容
 - `raw` - 保留原始格式
 
-## 🎯 使用场景
 
-### 1. AI 应用开发
-
-```typescript
-// 集成到现有应用
-import OpenAI from 'openai';
-
-const client = new OpenAI({
-  baseURL: "http://localhost:8080/v1",
-  apiKey: "your-token"
-});
-
-// 智能客服
-async function chatWithAI(message: string): Promise<string> {
-  const response = await client.chat.completions.create({
-    model: "GLM-4.5",
-    messages: [{ role: "user", content: message }]
-  });
-  return response.choices[0].message.content || "";
-}
-```
-
-### 2. 多模型对比测试
-
-```typescript
-const models = ["GLM-4.5", "GLM-4.5-Thinking", "GLM-4.5-Search", "GLM-4.5-Air"];
-
-for (const model of models) {
-  const response = await client.chat.completions.create({
-    model: model,
-    messages: [{ role: "user", content: "什么是机器学习？" }]
-  });
-  console.log(`\n=== ${model} ===`);
-  console.log(response.choices[0].message.content);
-}
-```
-
-### 3. 工具调用集成
-
-```typescript
-// 结合外部 API
-async function callExternalAPI(toolName: string, arguments: any): Promise<any> {
-  // 执行实际工具调用
-  return result;
-}
-
-// 处理工具调用
-if (response.choices[0].message.tool_calls) {
-  for (const toolCall of response.choices[0].message.tool_calls) {
-    const result = await callExternalAPI(
-      toolCall.function.name,
-      JSON.parse(toolCall.function.arguments)
-    );
-    // 将结果返回给模型继续对话
-  }
-}
-```
 
 ## ❓ 常见问题
 
