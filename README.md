@@ -1,6 +1,6 @@
 <div align="center">
   <img width="100" src="https://wsrv.nl/?url=https%3a%2f%2fz-cdn.chatglm.cn%2fz-ai%2fstatic%2flogo.svg&w=300&output=webp" />
-  <h1>Z.AI OpenAI API 代理服务 (Deno版)</h1>
+  <h1>Z.AI OpenAI API 代理服务 (旧版)</h1>
   
   ![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
   ![Deno: 1.40+](https://img.shields.io/badge/deno-1.40+-green.svg)
