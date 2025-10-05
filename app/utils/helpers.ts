@@ -3,6 +3,7 @@
  */
 
 import { config } from "../core/config.ts";
+import { backupTokenManager, AuthTokenInfo } from "../core/token_manager.ts";
 
 // 全局 UserAgent 实例，避免每次调用都创建新实例
 let _userAgentInstance: Record<string, string> | null = null;
@@ -233,19 +234,32 @@ export async function getAnonymousToken(): Promise<string> {
   }
 }
 
-export async function getAuthToken(): Promise<string> {
+export async function getAuthToken(): Promise<AuthTokenInfo> {
   /**Get authentication token (anonymous or fixed)*/
   if (config.ANONYMOUS_MODE) {
     try {
       const token = await getAnonymousToken();
       debugLog(`匿名token获取成功: ${token.substring(0, 10)}...`);
-      return token;
+      return {
+        token,
+        source: "anonymous",
+        displayToken: token,
+      };
     } catch (error) {
       debugLog(`匿名token获取失败，回退固定token: ${error}`);
     }
   }
-  
-  return config.BACKUP_TOKEN;
+
+  const backupToken = backupTokenManager.getNextToken() ?? config.BACKUP_TOKEN;
+  if (!backupToken) {
+    throw new Error("No backup token configured");
+  }
+
+  return {
+    token: backupToken,
+    source: "backup",
+    displayToken: backupTokenManager.getMaskedToken(backupToken),
+  };
 }
 
 export function transformThinkingContent(content: string): string {

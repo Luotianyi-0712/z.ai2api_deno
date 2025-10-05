@@ -7,6 +7,7 @@ import { Application, Router } from "oak/mod.ts";
 import { cors } from "jsr:@momiji/cors@^1.0.0";
 import { config } from "./app/core/config.ts";
 import { openaiRouter } from "./app/core/openai.ts";
+import { dashboardRouter } from "./app/dashboard/router.ts";
 
 // 创建 Oak 应用
 const app = new Application();
@@ -25,6 +26,10 @@ const router = new Router();
 // 引入 OpenAI API 路由
 router.use("/v1", openaiRouter.routes());
 router.use("/v1", openaiRouter.allowedMethods());
+
+// 引入 Dashboard 路由
+router.use(dashboardRouter.routes());
+router.use(dashboardRouter.allowedMethods());
 
 // 根路径端点
 router.get("/", (ctx) => {
