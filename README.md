@@ -81,10 +81,24 @@ console.log(response.choices[0].message.content);
 
 ### Docker 部署
 
+使用仓库根目录提供的 `Dockerfile` 可以快速构建镜像：
+
 ```bash
-cd deploy
-docker-compose up -d
+docker build -t zai2api .
+docker run --name zai2api -p 8080:8080 \
+  -e AUTH_TOKEN=your-auth-token \
+  -e BACKUP_TOKEN="token1,token2" \
+  zai2api
 ```
+
+> 仍可使用 `deploy` 目录中的示例 `docker-compose.yml` 进行编排部署。
+
+### 监控面板
+
+- 访问 `http://<host>:8080/dashboard` 打开监控控制台，登录密码与 `AUTH_TOKEN` 相同。
+- 实时查看总请求数、成功/失败统计与平均响应时间，支持自动刷新或手动刷新。
+- 最近 100 条请求详细信息（时间、方法、路径、状态、耗时、客户端 IP、使用的 Token）一目了然。
+- 在 Backup Token 管理界面中可以查看每个 Token 的成功/失败次数，并可在线添加或删除，立即生效。
 
 ## 📖 详细指南
 
