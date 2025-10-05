@@ -81,17 +81,26 @@ console.log(response.choices[0].message.content);
 
 ### Docker 部署
 
-使用仓库根目录提供的 `Dockerfile` 可以快速构建镜像：
+使用根目录提供的 `docker-compose.yml` 可以一键构建并启动：
 
 ```bash
-docker build -t zai2api .
-docker run --name zai2api -p 8080:8080 \
-  -e AUTH_TOKEN=your-auth-token \
-  -e BACKUP_TOKEN="token1,token2" \
-  zai2api
+# 如需自定义配置，先编辑仓库根目录的 .env 文件
+docker compose build
+docker compose up -d
 ```
 
-> 仍可使用 `deploy` 目录中的示例 `docker-compose.yml` 进行编排部署。
+- 默认 `.env` 已配置常用变量，`BACKUP_TOKEN` 支持用逗号分隔多个令牌并会在非匿名模式下自动轮询。
+- 如果你更喜欢手动构建镜像，同样可以直接使用 `Dockerfile`：
+
+  ```bash
+  docker build -t zai2api .
+  docker run --name zai2api -p 8080:8080 \
+    -e AUTH_TOKEN=your-auth-token \
+    -e BACKUP_TOKEN="token1,token2" \
+    zai2api
+  ```
+
+> 仍可使用 `deploy` 目录中的示例 `docker-compose.yml` 进行更复杂的编排部署。
 
 ### 监控面板
 

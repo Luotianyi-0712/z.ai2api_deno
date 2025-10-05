@@ -27,7 +27,8 @@ yarn-debug.log*
 yarn-error.log*
 
 # Environment variables
-.env
+# Local overrides remain ignored, but a default .env ships with the repo for
+# container quickstarts.
 .env.local
 .env.development.local
 .env.test.local

@@ -339,6 +339,17 @@ const dashboardPage = `<!DOCTYPE html>
       }
     }
 
+    function getErrorMessage(error) {
+      if (error && typeof error === 'object' && 'message' in error && error.message) {
+        return error.message;
+      }
+      try {
+        return JSON.stringify(error);
+      } catch {
+        return String(error);
+      }
+    }
+
     function setStatus(message, type = '') {
       statusMessage.textContent = message;
       statusMessage.className = 'message ' + type;
@@ -359,7 +370,7 @@ const dashboardPage = `<!DOCTYPE html>
         setStatus('数据已更新。', 'success');
       } catch (error) {
         console.error(error);
-        setStatus(error.message, 'error');
+        setStatus(getErrorMessage(error), 'error');
       }
     }
 
@@ -389,12 +400,12 @@ const dashboardPage = `<!DOCTYPE html>
       }
       for (const token of tokens) {
         const row = document.createElement('tr');
-        row.innerHTML = `
-          <td style="word-break: break-all;">${token.token}</td>
-          <td class="status-success">${token.success}</td>
-          <td class="status-failure">${token.failure}</td>
-          <td><button type="button" class="secondary" data-token="${encodeURIComponent(token.token)}">删除</button></td>
-        `;
+        row.innerHTML = \`
+          <td style="word-break: break-all;">\${token.token}</td>
+          <td class="status-success">\${token.success}</td>
+          <td class="status-failure">\${token.failure}</td>
+          <td><button type="button" class="secondary" data-token="\${encodeURIComponent(token.token)}">删除</button></td>
+        \`;
         tokenTableBody.appendChild(row);
       }
     }
@@ -402,7 +413,7 @@ const dashboardPage = `<!DOCTYPE html>
     function updateRequests(requests) {
       const requestTableBody = document.getElementById('requestTableBody');
       requestTableBody.innerHTML = '';
-      document.getElementById('requestCount').textContent = `${requests.length} 条记录`;
+      document.getElementById('requestCount').textContent = requests.length + ' 条记录';
       if (requests.length === 0) {
         const row = document.createElement('tr');
         const cell = document.createElement('td');
@@ -416,16 +427,16 @@ const dashboardPage = `<!DOCTYPE html>
       for (const req of requests) {
         const row = document.createElement('tr');
         const statusClass = req.success ? 'status-success' : 'status-failure';
-        row.innerHTML = `
-          <td>${formatTime(req.timestamp)}</td>
-          <td>${req.method}</td>
-          <td>${req.path}</td>
-          <td class="${statusClass}">${req.status}</td>
-          <td>${req.durationMs}</td>
-          <td class="${statusClass}">${req.success ? '成功' : '失败'}</td>
-          <td>${req.clientIp}</td>
-          <td>${req.tokenDisplay}</td>
-        `;
+        row.innerHTML = \`
+          <td>\${formatTime(req.timestamp)}</td>
+          <td>\${req.method}</td>
+          <td>\${req.path}</td>
+          <td class="\${statusClass}">\${req.status}</td>
+          <td>\${req.durationMs}</td>
+          <td class="\${statusClass}">\${req.success ? '成功' : '失败'}</td>
+          <td>\${req.clientIp}</td>
+          <td>\${req.tokenDisplay}</td>
+        \`;
         requestTableBody.appendChild(row);
       }
     }
@@ -481,7 +492,7 @@ const dashboardPage = `<!DOCTYPE html>
         updateTokens(data.tokens);
         setStatus('Token 列表已更新。');
       } catch (error) {
-        tokenMessage.textContent = error.message;
+        tokenMessage.textContent = getErrorMessage(error);
         tokenMessage.className = 'message error';
       }
     });
@@ -509,7 +520,7 @@ const dashboardPage = `<!DOCTYPE html>
         tokenMessage.className = 'message success';
         setStatus('Token 列表已更新。');
       } catch (error) {
-        tokenMessage.textContent = error.message;
+        tokenMessage.textContent = getErrorMessage(error);
         tokenMessage.className = 'message error';
       }
     });

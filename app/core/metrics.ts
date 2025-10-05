@@ -30,7 +30,7 @@ class MetricsManager {
   recordRequest(entry: Omit<RequestLogEntry, "tokenDisplay"> & { token: string; tokenSource: TokenSource | "none" }): void {
     const tokenDisplay = entry.tokenSource === "none"
       ? "-"
-      : formatTokenDisplay(entry.token, entry.tokenSource === "none" ? "backup" : entry.tokenSource);
+      : formatTokenDisplay(entry.token, entry.tokenSource);
 
     const logEntry: RequestLogEntry = {
       timestamp: entry.timestamp,

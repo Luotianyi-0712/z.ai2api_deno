@@ -1,18 +1,14 @@
 # Use the official Deno image
-FROM denoland/deno:1.40.0
+FROM denoland/deno:1.46.3
 
 # Set working directory
 WORKDIR /app
 
-# Copy dependency files
-COPY deno.json ./
-COPY deno.lock ./
+# Copy project files
+COPY . .
 
 # Cache dependencies
 RUN deno cache --unstable main.ts
-
-# Copy source code
-COPY . .
 
 # Create non-root user
 RUN addgroup --system --gid 1001 deno

@@ -250,7 +250,7 @@ export async function getAuthToken(): Promise<AuthTokenInfo> {
     }
   }
 
-  const backupToken = backupTokenManager.getNextToken() ?? config.BACKUP_TOKEN;
+  const backupToken = backupTokenManager.getNextToken();
   if (!backupToken) {
     throw new Error("No backup token configured");
   }
