@@ -12,6 +12,8 @@ import { debugLog, callUpstreamApi, transformThinkingContent } from "../utils/he
 import { SSEParser } from "../utils/sse_parser.ts";
 import { extractToolInvocations, removeToolJsonContent } from "../utils/tools.ts";
 
+type UpstreamResultCallback = (result: { success: boolean; status: number }) => void;
+
 export function createOpenAIResponseChunk(
   model: string,
   delta?: Delta,
@@ -82,10 +84,27 @@ export class StreamResponseHandler extends ResponseHandler {
   private bufferedContent: string = "";
   private toolCalls: unknown[] | null = null;
   private streamEnded: boolean = false; // 防止重复结束流
-  
-  constructor(upstreamReq: UpstreamRequest, chatId: string, authToken: string, hasTools: boolean = false) {
+  private readonly resultCallback?: UpstreamResultCallback;
+  private notifiedResult = false;
+
+  constructor(
+    upstreamReq: UpstreamRequest,
+    chatId: string,
+    authToken: string,
+    hasTools: boolean = false,
+    resultCallback?: UpstreamResultCallback,
+  ) {
     super(upstreamReq, chatId, authToken);
     this.hasTools = hasTools;
+    this.resultCallback = resultCallback;
+  }
+
+  private notifyResult(success: boolean, status: number): void {
+    if (this.notifiedResult) {
+      return;
+    }
+    this.notifiedResult = true;
+    this.resultCallback?.({ success, status });
   }
   
   async *handle(): AsyncGenerator<string, void, unknown> {
@@ -96,12 +115,14 @@ export class StreamResponseHandler extends ResponseHandler {
     try {
       response = await this._callUpstream();
     } catch {
+      this.notifyResult(false, 502);
       yield "data: {\"error\": \"Failed to call upstream\"}\n\n";
       return;
     }
-    
+
     if (!response.ok) {
       this._handleUpstreamError(response);
+      this.notifyResult(false, response.status);
       yield "data: {\"error\": \"Upstream error\"}\n\n";
       return;
     }
@@ -128,6 +149,7 @@ export class StreamResponseHandler extends ResponseHandler {
         // Check for errors
         if (this._hasError(upstreamData)) {
           const error = this._getError(upstreamData);
+          this.notifyResult(false, 502);
           if (!this.streamEnded) {
             yield* handleUpstreamError(error);
             this.streamEnded = true;
@@ -152,6 +174,7 @@ export class StreamResponseHandler extends ResponseHandler {
     } catch (streamError) {
       debugLog(`流处理异常: ${streamError}`);
       // 确保在异常情况下也能正确结束流
+      this.notifyResult(false, 500);
       if (!this.streamEnded) {
         try {
           const errorChunk = createOpenAIResponseChunk(
@@ -321,15 +344,33 @@ export class StreamResponseHandler extends ResponseHandler {
     yield "data: [DONE]\n\n";
     this.streamEnded = true;
     debugLog("流式响应完成");
+    this.notifyResult(true, 200);
   }
 }
 
 export class NonStreamResponseHandler extends ResponseHandler {
   private hasTools: boolean;
-  
-  constructor(upstreamReq: UpstreamRequest, chatId: string, authToken: string, hasTools: boolean = false) {
+  private readonly resultCallback?: UpstreamResultCallback;
+  private notifiedResult = false;
+
+  constructor(
+    upstreamReq: UpstreamRequest,
+    chatId: string,
+    authToken: string,
+    hasTools: boolean = false,
+    resultCallback?: UpstreamResultCallback,
+  ) {
     super(upstreamReq, chatId, authToken);
     this.hasTools = hasTools;
+    this.resultCallback = resultCallback;
+  }
+
+  private notifyResult(success: boolean, status: number): void {
+    if (this.notifiedResult) {
+      return;
+    }
+    this.notifiedResult = true;
+    this.resultCallback?.({ success, status });
   }
   
   async handle(): Promise<Response> {
@@ -341,14 +382,16 @@ export class NonStreamResponseHandler extends ResponseHandler {
       response = await this._callUpstream();
     } catch (error) {
       debugLog(`调用上游失败: ${error}`);
+      this.notifyResult(false, 502);
       return new Response(
         JSON.stringify({ error: "Failed to call upstream" }),
         { status: 502, headers: { "Content-Type": "application/json" } }
       );
     }
-    
+
     if (!response.ok) {
       this._handleUpstreamError(response);
+      this.notifyResult(false, response.status);
       return new Response(
         JSON.stringify({ error: "Upstream error" }),
         { status: 502, headers: { "Content-Type": "application/json" } }
@@ -434,12 +477,15 @@ export class NonStreamResponseHandler extends ResponseHandler {
     };
     
     debugLog("非流式响应发送完成");
-    return new Response(
+    const finalResponse = new Response(
       JSON.stringify(responseData),
-      { 
-        status: 200, 
-        headers: { "Content-Type": "application/json" } 
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
       }
     );
+
+    this.notifyResult(true, 200);
+    return finalResponse;
   }
 }
